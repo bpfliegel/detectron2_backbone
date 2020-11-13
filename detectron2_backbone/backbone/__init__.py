@@ -15,7 +15,8 @@ from .efficientnet import build_efficientnet_backbone, build_efficientnet_fpn_ba
 from .shufflenetv2 import build_shufflenet_v2_backbone, build_shufflenet_v2_fpn_backbone, build_fcos_shufflenet_v2_fpn_backbone
 from .resnest import build_resnest_backbone, build_resnest_fpn_backbone, build_fcos_resnest_fpn_backbone
 from .vovnet import build_vovnet_backbone, build_vovnet_fpn_backbone, build_fcos_vovnet_fpn_backbone
-from .mobilenet import build_mnv2_backbone, build_mnv2_fpn_backbone, build_fcos_mnv2_fpn_backbone
+from .mobilenetv2 import build_mnv2_backbone, build_mnv2_fpn_backbone, build_fcos_mnv2_fpn_backbone
+from .mobilenetv3 import build_mnv3_backbone, build_mnv3_fpn_backbone, build_fcos_mnv3_fpn_backbone
 from .hrnet import build_hrnet_backbone, build_hrnet_fpn_backbone
 from .dla import  build_dla_backbone, build_dla_fpn_backbone, build_fcos_dla_fpn_backbone
 

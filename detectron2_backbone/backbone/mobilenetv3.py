@@ -3,6 +3,7 @@
 # licensed under the  Apache License, Version 2.0, January 2004
 import fvcore.nn.weight_init as weight_init
 
+import math
 from torch import nn
 from torch.nn import BatchNorm2d
 #from detectron2.layers.batch_norm import NaiveSyncBatchNorm as BatchNorm2d
@@ -129,52 +130,32 @@ class InvertedResidual(nn.Module):
             return self.conv(x)
 
 
-class MobileNetV3(nn.Module):
-    def __init__(self, cfgs, mode='large', width_mult=1.):
+class MobileNetV3(Backbone):
+    def __init__(self, cfg, width_mult=1.):
         super(MobileNetV3, self).__init__()
-        # setting of inverted residual blocks
-        assert mode in ['large', 'small']
 
-        if mode == 'large':
-            self.cfgs = [
-                # k, t, c, SE, HS, s 
-                [3,   1,  16, 0, 0, 1],
-                [3,   4,  24, 0, 0, 2],
-                [3,   3,  24, 0, 0, 1], # 3
-                [5,   3,  40, 1, 0, 2],
-                [5,   3,  40, 1, 0, 1],
-                [5,   3,  40, 1, 0, 1], # 6
-                [3,   6,  80, 0, 1, 2],
-                [3, 2.5,  80, 0, 1, 1],
-                [3, 2.3,  80, 0, 1, 1],
-                [3, 2.3,  80, 0, 1, 1],
-                [3,   6, 112, 1, 1, 1],
-                [3,   6, 112, 1, 1, 1], # 12
-                [5,   6, 160, 1, 1, 2],
-                [5,   6, 160, 1, 1, 1],
-                [5,   6, 160, 1, 1, 1]  # 15
-            ]
-            self.return_features_indices = [3, 6, 12, 15]
-            self._out_feature_channels = {"res2": 24, "res3": 40, "res4": 112, "res5": 160}
-            self._out_feature_strides = {"res2": 4, "res3": 8, "res4": 16, "res5": 32}            
-        if mode == 'small':
-            self.cfgs = [
-                # k, t, c, SE, HS, s 
-                [3,    1,  16, 1, 0, 2],
-                [3,  4.5,  24, 0, 0, 2],
-                [3, 3.67,  24, 0, 0, 1], # 3
-                [5,    4,  40, 1, 1, 2],
-                [5,    6,  40, 1, 1, 1],
-                [5,    6,  40, 1, 1, 1], # 6
-                [5,    3,  48, 1, 1, 1],
-                [5,    3,  48, 1, 1, 1], # 9
-                [5,    6,  96, 1, 1, 2],
-                [5,    6,  96, 1, 1, 1],
-                [5,    6,  96, 1, 1, 1], # 12
-            ]
-            self.return_features_indices = [3, 6, 9, 12]
-            self._out_feature_channels = {"res2": 24, "res3": 40, "res4": 48, "res5": 96}
-            self._out_feature_strides = {"res2": 8, "res3": 16, "res4": 16, "res5": 32}            
+        # Large
+        self.cfgs = [
+            # k, t, c, SE, HS, s 
+            [3,   1,  16, 0, 0, 1],
+            [3,   4,  24, 0, 0, 2],
+            [3,   3,  24, 0, 0, 1], # 3
+            [5,   3,  40, 1, 0, 2],
+            [5,   3,  40, 1, 0, 1],
+            [5,   3,  40, 1, 0, 1], # 6
+            [3,   6,  80, 0, 1, 2],
+            [3, 2.5,  80, 0, 1, 1],
+            [3, 2.3,  80, 0, 1, 1],
+            [3, 2.3,  80, 0, 1, 1],
+            [3,   6, 112, 1, 1, 1],
+            [3,   6, 112, 1, 1, 1], # 12
+            [5,   6, 160, 1, 1, 2],
+            [5,   6, 160, 1, 1, 1],
+            [5,   6, 160, 1, 1, 1]  # 15
+        ]
+        self.return_features_indices = [3, 6, 12, 15]
+        self._out_feature_channels = {"res2": 24, "res3": 40, "res4": 112, "res5": 160}
+        self._out_feature_strides = {"res2": 4, "res3": 8, "res4": 16, "res5": 32}                       
 
         # building first layer
         input_channel = _make_divisible(16 * width_mult, 8)

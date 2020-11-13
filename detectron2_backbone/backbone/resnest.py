@@ -48,7 +48,7 @@ class SplAtConv2d(Module):
     def __init__(self, in_channels, channels, kernel_size, stride=(1, 1), padding=(0, 0),
                  dilation=(1, 1), groups=1, bias=True,
                  radix=2, reduction_factor=4,
-                 rectify=False, rectify_avg=False, norm_layer=None,
+                 rectify=False, rectify_avg=False, norm=None,
                  dropblock_prob=0.0, **kwargs):
         super(SplAtConv2d, self).__init__()
         padding = _pair(padding)
@@ -66,13 +66,13 @@ class SplAtConv2d(Module):
         else:
             self.conv = Conv2d(in_channels, channels*radix, kernel_size, stride, padding, dilation,
                                groups=groups*radix, bias=bias, **kwargs)
-        self.use_bn = norm_layer is not None
+        self.use_bn = norm is not None
         if self.use_bn:
-            self.bn0 = norm_layer(channels*radix)
+            self.bn0 = get_norm(norm, channels*radix)
         self.relu = ReLU(inplace=True)
         self.fc1 = Conv2d(channels, inter_channels, 1, groups=self.cardinality)
         if self.use_bn:
-            self.bn1 = norm_layer(inter_channels)
+            self.bn1 = get_norm(norm, inter_channels)
         self.fc2 = Conv2d(inter_channels, channels*radix, 1, groups=self.cardinality)
         if dropblock_prob > 0.0:
             self.dropblock = DropBlock2D(dropblock_prob, 3)
@@ -130,6 +130,7 @@ class ResNetBlockBase(nn.Module):
     def __init__(self, in_channels, out_channels, stride):
         """
         The `__init__` method of any subclass should also contain these arguments.
+
         Args:
             in_channels (int):
             out_channels (int):
@@ -151,6 +152,7 @@ class BasicBlock(ResNetBlockBase):
     def __init__(self, in_channels, out_channels, *, stride=1, norm="BN"):
         """
         The standard block type for ResNet18 and ResNet34.
+
         Args:
             in_channels (int): Number of input channels.
             out_channels (int): Number of output channels.
@@ -380,22 +382,44 @@ class DeformBottleneckBlock(ResNetBlockBase):
         dilation=1,
         deform_modulated=False,
         deform_num_groups=1,
+        avd=False,
+        avg_down=False,
+        radix=2,
+        bottleneck_width=64,
     ):
         """
         Similar to :class:`BottleneckBlock`, but with deformable conv in the 3x3 convolution.
         """
         super().__init__(in_channels, out_channels, stride)
         self.deform_modulated = deform_modulated
+        self.avd = avd and (stride>1)
+        self.avg_down = avg_down
+        self.radix = radix
+
+        cardinality = num_groups
+        group_width = int(bottleneck_channels * (bottleneck_width / 64.)) * cardinality 
 
         if in_channels != out_channels:
-            self.shortcut = Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=1,
-                stride=stride,
-                bias=False,
-                norm=get_norm(norm, out_channels),
-            )
+            if self.avg_down:
+                self.shortcut_avgpool = nn.AvgPool2d(kernel_size=stride, stride=stride, 
+                                                     ceil_mode=True, count_include_pad=False)
+                self.shortcut = Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=1,
+                    stride=1,
+                    bias=False,
+                    norm=get_norm(norm, out_channels),
+                )
+            else:
+                self.shortcut = Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                    norm=get_norm(norm, out_channels),
+                )
         else:
             self.shortcut = None
 
@@ -403,11 +427,11 @@ class DeformBottleneckBlock(ResNetBlockBase):
 
         self.conv1 = Conv2d(
             in_channels,
-            bottleneck_channels,
+            group_width,
             kernel_size=1,
             stride=stride_1x1,
             bias=False,
-            norm=get_norm(norm, bottleneck_channels),
+            norm=get_norm(norm, group_width),
         )
 
         if deform_modulated:
@@ -422,34 +446,58 @@ class DeformBottleneckBlock(ResNetBlockBase):
             bottleneck_channels,
             offset_channels * deform_num_groups,
             kernel_size=3,
-            stride=stride_3x3,
+            stride=1 if self.avd else stride_3x3,
             padding=1 * dilation,
             dilation=dilation,
+            groups=deform_num_groups,
         )
-        self.conv2 = deform_conv_op(
-            bottleneck_channels,
-            bottleneck_channels,
-            kernel_size=3,
-            stride=stride_3x3,
-            padding=1 * dilation,
-            bias=False,
-            groups=num_groups,
-            dilation=dilation,
-            deformable_groups=deform_num_groups,
-            norm=get_norm(norm, bottleneck_channels),
-        )
+        if self.radix>1:
+            # from .splat import SplAtConv2d_dcn
+            self.conv2 = SplAtConv2d_dcn(
+                            group_width, group_width, kernel_size=3, 
+                            stride = 1 if self.avd else stride_3x3,
+                            padding=dilation, dilation=dilation, 
+                            groups=cardinality, bias=False,
+                            radix=self.radix, 
+                            norm=norm,
+                            deform_conv_op=deform_conv_op,
+                            deformable_groups=deform_num_groups,
+                            deform_modulated=deform_modulated,
+
+                         )
+        else:
+            self.conv2 = deform_conv_op(
+                bottleneck_channels,
+                bottleneck_channels,
+                kernel_size=3,
+                stride=1 if self.avd else stride_3x3,
+                padding=1 * dilation,
+                bias=False,
+                groups=num_groups,
+                dilation=dilation,
+                deformable_groups=deform_num_groups,
+                norm=get_norm(norm, bottleneck_channels),
+            )
+
+        if self.avd:
+            self.avd_layer = nn.AvgPool2d(3, stride, padding=1)
 
         self.conv3 = Conv2d(
-            bottleneck_channels,
+            group_width,
             out_channels,
             kernel_size=1,
             bias=False,
             norm=get_norm(norm, out_channels),
         )
 
-        for layer in [self.conv1, self.conv2, self.conv3, self.shortcut]:
-            if layer is not None:  # shortcut can be None
-                weight_init.c2_msra_fill(layer)
+        if self.radix>1:
+            for layer in [self.conv1, self.conv3, self.shortcut]:
+                if layer is not None:  # shortcut can be None
+                    weight_init.c2_msra_fill(layer)
+        else:
+            for layer in [self.conv1, self.conv2, self.conv3, self.shortcut]:
+                if layer is not None:  # shortcut can be None
+                    weight_init.c2_msra_fill(layer)
 
         nn.init.constant_(self.conv2_offset.weight, 0)
         nn.init.constant_(self.conv2_offset.bias, 0)
@@ -458,20 +506,29 @@ class DeformBottleneckBlock(ResNetBlockBase):
         out = self.conv1(x)
         out = F.relu_(out)
 
-        if self.deform_modulated:
-            offset_mask = self.conv2_offset(out)
-            offset_x, offset_y, mask = torch.chunk(offset_mask, 3, dim=1)
-            offset = torch.cat((offset_x, offset_y), dim=1)
-            mask = mask.sigmoid()
-            out = self.conv2(out, offset, mask)
-        else:
+        if self.radix>1:
             offset = self.conv2_offset(out)
             out = self.conv2(out, offset)
-        out = F.relu_(out)
+        else:
+            if self.deform_modulated:
+                offset_mask = self.conv2_offset(out)
+                offset_x, offset_y, mask = torch.chunk(offset_mask, 3, dim=1)
+                offset = torch.cat((offset_x, offset_y), dim=1)
+                mask = mask.sigmoid()
+                out = self.conv2(out, offset, mask)
+            else:
+                offset = self.conv2_offset(out)
+                out = self.conv2(out, offset)
+            out = F.relu_(out)
+
+        if self.avd:
+            out = self.avd_layer(out)
 
         out = self.conv3(out)
 
         if self.shortcut is not None:
+            if self.avg_down:
+                x = self.shortcut_avgpool(x) 
             shortcut = self.shortcut(x)
         else:
             shortcut = x
@@ -484,12 +541,14 @@ class DeformBottleneckBlock(ResNetBlockBase):
 def make_stage(block_class, num_blocks, first_stride, **kwargs):
     """
     Create a resnet stage by creating many blocks.
+
     Args:
         block_class (class): a subclass of ResNetBlockBase
         num_blocks (int):
         first_stride (int): the stride of the first block. The other blocks will have stride=1.
             A `stride` argument will be passed to the block constructor.
         kwargs: other arguments passed to the block constructor.
+
     Returns:
         list[nn.Module]: a list of block module.
     """
@@ -648,6 +707,7 @@ class ResNest(Backbone):
 def build_resnest_backbone(cfg, input_shape):
     """
     Create a ResNet instance from config.
+
     Returns:
         ResNet: a :class:`ResNet` instance.
     """
@@ -754,7 +814,6 @@ def build_resnest_backbone(cfg, input_shape):
                 block.freeze()
         stages.append(blocks)
     return ResNest(stem, stages, out_features=out_features)
-
 
 @BACKBONE_REGISTRY.register()
 def build_resnest_fpn_backbone(cfg, input_shape: ShapeSpec):

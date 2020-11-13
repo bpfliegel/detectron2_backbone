@@ -19,7 +19,8 @@ from .mobilenet import build_mnv2_backbone, build_mnv2_fpn_backbone, build_fcos_
 from .hrnet import build_hrnet_backbone, build_hrnet_fpn_backbone
 from .dla import  build_dla_backbone, build_dla_fpn_backbone, build_fcos_dla_fpn_backbone
 
-from .bifpn import BiFPNLayer, build_efficientnet_bifpn_backbone
+# TODO: some formatting problem
+# from .bifpn import BiFPNLayer, build_efficientnet_bifpn_backbone
 
 # from .config import add_backbone_config
 __all__ = [k for k in globals().keys()] 

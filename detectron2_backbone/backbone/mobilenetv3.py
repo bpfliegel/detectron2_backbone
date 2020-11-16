@@ -1,6 +1,5 @@
-# taken from https://github.com/tonylins/pytorch-mobilenet-v2/
-# Published by Ji Lin, tonylins
-# licensed under the  Apache License, Version 2.0, January 2004
+# Original code: https://github.com/d-li14/mobilenetv3.pytorch
+# Adapted for Detectron2 by bpfliegel
 import fvcore.nn.weight_init as weight_init
 
 import math
